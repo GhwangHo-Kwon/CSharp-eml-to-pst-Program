@@ -1,0 +1,55 @@
+From: =?utf-8?b?67O064K4IOyCrOuejA==?= <sender@example.com>
+To: =?utf-8?b?67Cb64qUIOyCrOuejA==?= <recipient@example.com>
+Subject: =?utf-8?b?7YWM7Iqk7Yq4IOuplOydvCAyIMK3IEhUTUzqs7wg7LKo67aA7YyM7J28?=
+Date: Tue, 03 Nov 2026 10:30:00 +0900
+Message-ID: <eml-pst-sample-3@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============1100558739558970903=="
+
+--===============1100558739558970903==
+Content-Type: multipart/alternative;
+ boundary="===============8504442178434678694=="
+
+--===============8504442178434678694==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+7ZWc6riAIOuzuOusuOydtCDtkZzsi5zrkJjripTsp4Ag7ZmV7J247ZWY64qUIOqwgOyDgSDthYzs
+iqTtirgg66mU7J287J6F64uI64ukLg0K
+
+--===============8504442178434678694==
+MIME-Version: 1.0
+Content-Type: multipart/related;
+ boundary="===============2761917971102234903=="
+
+--===============2761917971102234903==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PHA+PGI+SFRNTCDrs7jrrLg8L2I+IOuwjyDsnbjrnbzsnbgg7J2066+47KeA
+PC9wPjxpbWcgc3JjPSJjaWQ6dGVzdC1pbWFnZUBleGFtcGxlLmNvbSIgd2lkdGg9IjE2IiBoZWln
+aHQ9IjE2IiBhbHQ9Iu2FjOyKpO2KuCDsnbTrr7jsp4AiPjwvYm9keT48L2h0bWw+DQo=
+
+--===============2761917971102234903==
+MIME-Version: 1.0
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Disposition: inline
+Content-ID: <test-image@example.com>
+
+iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGUlEQVR4nGPUyFjBQApgIkn1qIZR
+DUNKAwDszQFYiKDWmQAAAABJRU5ErkJggg==
+
+--===============2761917971102234903==--
+
+--===============8504442178434678694==--
+
+--===============1100558739558970903==
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename*=utf-8''%EC%95%88%EB%82%B4.txt
+MIME-Version: 1.0
+
+7LKo67aA7YyM7J28IOybkOusuAo=
+
+--===============1100558739558970903==--
