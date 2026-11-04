@@ -31,7 +31,9 @@ Windows용 C# WPF MVVM 프로젝트입니다. 선택한 폴더의 EML을 새 Uni
 | --- | --- |
 | `START`, `SCAN` | 원본과 결과 경로, 옵션, 파일 검색 건수 |
 | `EML_READ`, `PST_ADD_ITEM` | 파일별 상대 경로, 처리 순번, 누적 기록 및 읽기 실패 건수 |
+| `EML_ATTACHMENTS` | 원본 EML 크기, 읽어 낸 파일·인라인 첨부의 개수, 합계 및 최대 크기 |
 | `PST_FINALIZE` | PST 저장 시작·완료, 저장 크기, 폴더와 메일 수, 변환 진단 코드 |
+| `PST_VERIFY` | 저장된 PST를 다시 읽어 원본에서 읽은 첨부와 개수·크기·SHA-256 비교, 불일치 또는 읽기 오류가 발생한 메일 |
 | `OUTLOOK_ATTACH` | 옵션 해제 등으로 건너뛴 이유 또는 Outlook 연결 결과 |
 | `CANCEL`, `END` | 취소 시점, 최종 집계, 소요 시간, PST 경로 |
 
@@ -43,6 +45,7 @@ Windows용 C# WPF MVVM 프로젝트입니다. 선택한 폴더의 EML을 새 Uni
 - 읽을 수 없는 EML은 실패로 기록하고 다음 파일로 넘어갑니다. PST 기록 또는 확정 단계에서 예외가 발생하면 변환을 중단하고 저장 여부를 표시합니다.
 - 취소를 요청하면 현재 쓰기 작업을 마친 뒤 이미 기록한 메일을 PST로 저장합니다. 저장된 메일이 있더라도 취소한 작업에서는 Outlook 자동 연결을 건너뜁니다.
 - 자동 연결에 실패해도 완성된 PST는 저장 위치에 남습니다.
+- 일반 파일과 인라인 첨부 데이터는 메일별로 저장 전후에 확인합니다. 링크, 임베디드 Outlook 항목, 일정과 연락처로 변환되는 MIME 콘텐츠는 별도 형식이므로 이 바이트 비교의 범위에서 제외됩니다. 검증에 실패하면 PST는 확인을 위해 보관하고 Outlook 자동 연결은 건너뜁니다.
 - EML의 날짜, 인라인 이미지, 특수 인코딩, 서명·암호화 메일은 라이브러리가 변환하는 범위에 따릅니다. Outlook에서 표시되는 형태는 대표 샘플로 확인할 수 있습니다.
 
 ## 프로젝트 구조
@@ -53,6 +56,7 @@ Windows용 C# WPF MVVM 프로젝트입니다. 선택한 폴더의 EML을 새 Uni
 | `ViewModels/MainViewModel.cs` | 화면 상태, 명령, 취소 |
 | `Models/ImportModels.cs` | 옵션, 진행률, 결과 |
 | `Services/PstImportService.cs` | EML 검색, 읽기, Unicode PST 쓰기, 저장 후 연결 분기 |
+| `Services/AttachmentVerification.cs` | 파일·인라인 첨부의 바이트 수와 SHA-256 검증 |
 | `Services/OutlookPstAttacher.cs` | 이미 저장된 PST를 클래식 Outlook에 연결 |
 | `Services/ImportLog.cs` | 변환 건별 로그 파일 생성 및 기록 |
 
@@ -70,7 +74,8 @@ EML 읽기와 PST 생성은 작업 스레드에서 수행합니다. 자동 연�
 | 메일 원본 내용 | 한글 제목·본문, 보낸 사람·받는 사람, 날짜, 인라인 이미지와 `안내.txt` 첨부 확인 |
 | 복사한 샘플 폴더에 0바이트 `empty.eml` 추가 | 메일 두 건 저장. 실패 목록 및 로그에 `empty.eml` 기록 |
 | 기존 PST 경로를 다시 선택 | 기존 파일 유지. 로그에 경로 검증 실패 기록 |
-| 자동 연결 선택 | 로그에 `PST_FINALIZE` 저장 완료가 `OUTLOOK_ATTACH` 시작보다 먼저 표시 |
+| 자동 연결 선택 | 로그에 `PST_FINALIZE` 저장 완료와 `PST_VERIFY`가 `OUTLOOK_ATTACH` 시작보다 먼저 표시 |
 | Outlook이 없는 PC에서 자동 연결 선택 | PST는 저장되고 화면과 로그에 연결 실패 표시 |
+| 첨부가 누락된 원본 EML만 별도 폴더에서 재변환 | `EML_ATTACHMENTS`에서 읽은 첨부 개수와 크기를 확인. `PST_VERIFY`의 `matched`는 라이브러리로 PST를 다시 읽었을 때 첨부 바이트가 일치했음을 뜻함. Outlook에서도 첨부를 열거나 저장해 확인 |
 
 Windows 빌드와 실제 Outlook에서 PST 열기는 위 환경에서 확인해야 합니다.

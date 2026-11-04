@@ -22,7 +22,8 @@ internal sealed class PstImportService
             ImportResult result = await Task.Run(
                 () => WritePst(options, progress, log, cancellationToken), cancellationToken);
 
-            if (options.AttachToOutlook && result.PstPath is string path && !result.Cancelled)
+            if (options.AttachToOutlook && result.PstPath is string path && !result.Cancelled
+                && !result.AttachmentVerificationFailed)
             {
                 progress.Report(new ImportProgress(result.Imported + result.Failures.Count, result.Total,
                     result.Imported, result.Failures.Count, "완성된 PST를 Outlook에 연결 중"));
@@ -38,8 +39,10 @@ internal sealed class PstImportService
             }
             else
             {
-                log.Info("OUTLOOK_ATTACH", options.AttachToOutlook
-                    ? "skipped: no eligible saved PST" : "skipped: option disabled");
+                string reason = !options.AttachToOutlook ? "option disabled"
+                    : result.AttachmentVerificationFailed ? "attachment verification failed"
+                    : "no eligible saved PST";
+                log.Info("OUTLOOK_ATTACH", $"skipped: {reason}");
             }
 
             result = result with { Cancelled = result.Cancelled || cancellationToken.IsCancellationRequested };
@@ -47,6 +50,7 @@ internal sealed class PstImportService
             log.Info("END", $"total={result.Total} | written={result.Imported} | saved={saved}"
                 + $" | failed={result.Failures.Count} | unprocessed={result.Total - result.Imported - result.Failures.Count}"
                 + $" | cancelled={result.Cancelled} | attached={result.AttachedToOutlook}"
+                + $" | attachmentVerificationFailed={result.AttachmentVerificationFailed}"
                 + $" | elapsedMs={elapsed.ElapsedMilliseconds} | pst={result.PstPath ?? "(none)"}");
             return result;
         }
@@ -95,9 +99,11 @@ internal sealed class PstImportService
         var reader = new EmailDocumentReader();
         var failures = new List<ImportFailure>();
         var warnings = new List<string>();
+        var expectedAttachments = new Dictionary<string, ExpectedAttachments>(StringComparer.OrdinalIgnoreCase);
         var uiUpdate = Stopwatch.StartNew();
         int imported = 0;
         bool cancelled = false;
+        bool attachmentVerificationFailed = false;
         string? savedPath = null;
         string? currentFile = null;
         stage = "PST_CREATE";
@@ -141,12 +147,19 @@ internal sealed class PstImportService
                                 throw new InvalidDataException($"EML을 읽는 중 오류가 발생했습니다. ({codes})");
                             }
 
+                            AttachmentPayload[] payloads = AttachmentVerification.Capture(message.Document, cancellationToken);
+                            log.Info("EML_ATTACHMENTS", $"file={currentFile} | emlBytes={message.BytesRead}"
+                                + $" | {AttachmentVerification.Describe(payloads)}");
                             cancellationToken.ThrowIfCancellationRequested();
                             stage = "PST_ADD_ITEM";
                             string relativeFolder = Path.GetDirectoryName(currentFile) ?? "";
                             string folderId = EnsureFolder(writer, folderIds, relativeFolder);
                             // Once a write starts, finish it before observing cancellation.
-                            writer.AddItem(folderId, message.Document);
+                            string itemId = writer.AddItem(folderId, message.Document);
+                            if (payloads.Length > 0)
+                            {
+                                expectedAttachments.Add(itemId, new ExpectedAttachments(currentFile, payloads));
+                            }
                         }
 
                         imported++;
@@ -187,6 +200,32 @@ internal sealed class PstImportService
                 {
                     warnings.Add("일부 메시지 속성 또는 첨부 형식에 대한 변환 진단이 있습니다. 로그를 확인해 주세요.");
                 }
+
+                if (expectedAttachments.Count > 0)
+                {
+                    progress.Report(new ImportProgress(imported + failures.Count, files.Length,
+                        imported, failures.Count, "PST 첨부파일 검증 중"));
+                    log.Info("PST_VERIFY", $"started | messages={expectedAttachments.Count}");
+                    try
+                    {
+                        int mismatches = AttachmentVerification.Verify(output, expectedAttachments, log);
+                        if (mismatches > 0)
+                        {
+                            attachmentVerificationFailed = true;
+                            warnings.Add($"메일 {mismatches:N0}건의 첨부파일 검증에 실패했습니다. 로그의 PST_VERIFY를 확인해 주세요.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        attachmentVerificationFailed = true;
+                        warnings.Add($"저장된 PST의 첨부파일을 확인하지 못했습니다. {DescribeError(ex)}");
+                        log.Error("PST_VERIFY", "verification stopped", ex);
+                    }
+                }
+                else
+                {
+                    log.Info("PST_VERIFY", "skipped: no file attachment payloads");
+                }
             }
             else
             {
@@ -204,7 +243,8 @@ internal sealed class PstImportService
             log.Error(stage, $"failed | file={currentFile ?? "(none)"} | written={imported}", ex);
         }
 
-        return new ImportResult(files.Length, imported, failures, cancelled, savedPath, false, warnings);
+        return new ImportResult(files.Length, imported, failures, cancelled, savedPath, false, warnings,
+            attachmentVerificationFailed);
     }
 
     private static EmailReadResult ReadEml(EmailDocumentReader reader, string path, CancellationToken cancellationToken)
