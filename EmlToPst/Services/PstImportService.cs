@@ -23,7 +23,7 @@ internal sealed class PstImportService
                 () => WritePst(options, progress, log, cancellationToken), cancellationToken);
 
             if (options.AttachToOutlook && result.PstPath is string path && !result.Cancelled
-                && !result.AttachmentVerificationFailed)
+                && !result.AttachmentVerificationFailed && !result.ReceivedDateVerificationFailed)
             {
                 progress.Report(new ImportProgress(result.Imported + result.Failures.Count, result.Total,
                     result.Imported, result.Failures.Count, "완성된 PST를 Outlook에 연결 중"));
@@ -39,9 +39,13 @@ internal sealed class PstImportService
             }
             else
             {
-                string reason = !options.AttachToOutlook ? "option disabled"
-                    : result.AttachmentVerificationFailed ? "attachment verification failed"
-                    : "no eligible saved PST";
+                string reason = (options.AttachToOutlook, result.AttachmentVerificationFailed, result.ReceivedDateVerificationFailed) switch
+                {
+                    (false, _, _) => "option disabled",
+                    (_, true, _) => "attachment verification failed",
+                    (_, _, true) => "received date verification failed",
+                    _ => "no eligible saved PST"
+                };
                 log.Info("OUTLOOK_ATTACH", $"skipped: {reason}");
             }
 
@@ -51,6 +55,7 @@ internal sealed class PstImportService
                 + $" | failed={result.Failures.Count} | unprocessed={result.Total - result.Imported - result.Failures.Count}"
                 + $" | cancelled={result.Cancelled} | attached={result.AttachedToOutlook}"
                 + $" | attachmentVerificationFailed={result.AttachmentVerificationFailed}"
+                + $" | receivedDateVerificationFailed={result.ReceivedDateVerificationFailed}"
                 + $" | elapsedMs={elapsed.ElapsedMilliseconds} | pst={result.PstPath ?? "(none)"}");
             return result;
         }
@@ -99,11 +104,13 @@ internal sealed class PstImportService
         var reader = new EmailDocumentReader();
         var failures = new List<ImportFailure>();
         var warnings = new List<string>();
-        var expectedAttachments = new Dictionary<string, ExpectedAttachments>(StringComparer.OrdinalIgnoreCase);
+        var expectedMessages = new Dictionary<string, ExpectedMessage>(StringComparer.OrdinalIgnoreCase);
         var uiUpdate = Stopwatch.StartNew();
         int imported = 0;
+        int receivedDates = 0;
         bool cancelled = false;
         bool attachmentVerificationFailed = false;
+        bool receivedDateVerificationFailed = false;
         string? savedPath = null;
         string? currentFile = null;
         stage = "PST_CREATE";
@@ -147,18 +154,28 @@ internal sealed class PstImportService
                                 throw new InvalidDataException($"EML을 읽는 중 오류가 발생했습니다. ({codes})");
                             }
 
-                            AttachmentPayload[] payloads = AttachmentVerification.Capture(message.Document, cancellationToken);
+                            string receivedSource = EmlTimestampMapper.Apply(message.Document);
+                            DateTimeOffset? receivedDate = message.Document.ReceivedDate;
+                            log.Info("EML_DATES", $"file={currentFile} | receivedSource={receivedSource}"
+                                + $" | received={receivedDate?.ToString("O") ?? "(none)"}"
+                                + $" | sent={message.Document.Date?.ToString("O") ?? "(none)"}");
+                            AttachmentPayload[] payloads = PstVerification.Capture(message.Document, cancellationToken);
                             log.Info("EML_ATTACHMENTS", $"file={currentFile} | emlBytes={message.BytesRead}"
-                                + $" | {AttachmentVerification.Describe(payloads)}");
+                                + $" | {PstVerification.Describe(payloads)}");
                             cancellationToken.ThrowIfCancellationRequested();
                             stage = "PST_ADD_ITEM";
                             string relativeFolder = Path.GetDirectoryName(currentFile) ?? "";
                             string folderId = EnsureFolder(writer, folderIds, relativeFolder);
                             // Once a write starts, finish it before observing cancellation.
                             string itemId = writer.AddItem(folderId, message.Document);
-                            if (payloads.Length > 0)
+                            if (receivedDate.HasValue)
                             {
-                                expectedAttachments.Add(itemId, new ExpectedAttachments(currentFile, payloads));
+                                receivedDates++;
+                            }
+
+                            if (payloads.Length > 0 || receivedDate.HasValue)
+                            {
+                                expectedMessages.Add(itemId, new ExpectedMessage(currentFile, payloads, receivedDate));
                             }
                         }
 
@@ -201,30 +218,45 @@ internal sealed class PstImportService
                     warnings.Add("일부 메시지 속성 또는 첨부 형식에 대한 변환 진단이 있습니다. 로그를 확인해 주세요.");
                 }
 
-                if (expectedAttachments.Count > 0)
+                if (imported > receivedDates)
+                {
+                    warnings.Add($"메일 {imported - receivedDates:N0}건에서 원본 수신 일자를 확인할 수 없었습니다. 로그의 EML_DATES를 확인해 주세요.");
+                }
+
+                if (expectedMessages.Count > 0)
                 {
                     progress.Report(new ImportProgress(imported + failures.Count, files.Length,
-                        imported, failures.Count, "PST 첨부파일 검증 중"));
-                    log.Info("PST_VERIFY", $"started | messages={expectedAttachments.Count}");
+                        imported, failures.Count, "PST 첨부파일 및 수신 일자 검증 중"));
+                    int attachmentMessages = expectedMessages.Values.Count(message => message.Payloads.Length > 0);
+                    log.Info("PST_VERIFY", $"started | messages={attachmentMessages}");
+                    log.Info("PST_DATE_VERIFY", $"started | messages={receivedDates} | sourceDateMissing={imported - receivedDates}");
                     try
                     {
-                        int mismatches = AttachmentVerification.Verify(output, expectedAttachments, log);
-                        if (mismatches > 0)
+                        PstVerificationResult verification = PstVerification.Verify(output, expectedMessages, log);
+                        if (verification.AttachmentFailures > 0)
                         {
                             attachmentVerificationFailed = true;
-                            warnings.Add($"메일 {mismatches:N0}건의 첨부파일 검증에 실패했습니다. 로그의 PST_VERIFY를 확인해 주세요.");
+                            warnings.Add($"메일 {verification.AttachmentFailures:N0}건의 첨부파일 검증에 실패했습니다. 로그의 PST_VERIFY를 확인해 주세요.");
+                        }
+
+                        if (verification.DateFailures > 0)
+                        {
+                            receivedDateVerificationFailed = true;
+                            warnings.Add($"메일 {verification.DateFailures:N0}건의 수신 일자 검증에 실패했습니다. 로그의 PST_DATE_VERIFY를 확인해 주세요.");
                         }
                     }
                     catch (Exception ex)
                     {
-                        attachmentVerificationFailed = true;
-                        warnings.Add($"저장된 PST의 첨부파일을 확인하지 못했습니다. {DescribeError(ex)}");
+                        attachmentVerificationFailed = attachmentMessages > 0;
+                        receivedDateVerificationFailed = receivedDates > 0;
+                        warnings.Add($"저장된 PST를 다시 읽어 검증하지 못했습니다. {DescribeError(ex)}");
                         log.Error("PST_VERIFY", "verification stopped", ex);
                     }
                 }
                 else
                 {
                     log.Info("PST_VERIFY", "skipped: no file attachment payloads");
+                    log.Info("PST_DATE_VERIFY", $"skipped: no source received dates | sourceDateMissing={imported}");
                 }
             }
             else
@@ -244,7 +276,7 @@ internal sealed class PstImportService
         }
 
         return new ImportResult(files.Length, imported, failures, cancelled, savedPath, false, warnings,
-            attachmentVerificationFailed);
+            attachmentVerificationFailed, receivedDateVerificationFailed);
     }
 
     private static EmailReadResult ReadEml(EmailDocumentReader reader, string path, CancellationToken cancellationToken)

@@ -1,3 +1,5 @@
+Received: from sender.example by inbox.example; timestamp unavailable
+Received: from source.example by sender.example; Tue, 3 Nov 2026 01:40:05 +0000 (UTC)
 From: =?utf-8?b?67O064K4IOyCrOuejA==?= <sender@example.com>
 To: =?utf-8?b?67Cb64qUIOyCrOuejA==?= <recipient@example.com>
 Subject: =?utf-8?b?7YWM7Iqk7Yq4IOuplOydvCAyIMK3IEhUTUzqs7wg7LKo67aA7YyM7J28?=

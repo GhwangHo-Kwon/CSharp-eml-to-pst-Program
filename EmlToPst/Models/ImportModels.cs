@@ -23,4 +23,5 @@ internal sealed record ImportResult(
     string? PstPath,
     bool AttachedToOutlook,
     IReadOnlyList<string> Warnings,
-    bool AttachmentVerificationFailed = false);
+    bool AttachmentVerificationFailed = false,
+    bool ReceivedDateVerificationFailed = false);
