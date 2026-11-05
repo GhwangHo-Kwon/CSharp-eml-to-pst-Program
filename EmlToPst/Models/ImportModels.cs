@@ -24,4 +24,5 @@ internal sealed record ImportResult(
     bool AttachedToOutlook,
     IReadOnlyList<string> Warnings,
     bool AttachmentVerificationFailed = false,
-    bool ReceivedDateVerificationFailed = false);
+    bool ReceivedDateVerificationFailed = false,
+    bool ReadStateVerificationFailed = false);

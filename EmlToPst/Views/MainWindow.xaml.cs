@@ -1,25 +1,54 @@
 using System.ComponentModel;
 using System.Windows;
 using EmlToPst.ViewModels;
+using EmlToPst.Services;
 
 namespace EmlToPst.Views;
 
 public partial class MainWindow : Window
 {
-    public MainWindow()
+    private readonly ImportLog log;
+    private bool waitingForClose;
+    private bool allowClose;
+
+    internal MainWindow(ImportLog log)
     {
+        this.log = log;
         InitializeComponent();
     }
 
-    protected override void OnClosing(CancelEventArgs e)
+    protected override async void OnClosing(CancelEventArgs e)
     {
-        if (DataContext is MainViewModel { IsBusy: true })
+        base.OnClosing(e);
+        if (e.Cancel || allowClose) return;
+        log.Info("UI_CLOSE_REQUEST", "window close requested");
+        if (DataContext is ApplicationViewModel viewModel)
         {
             e.Cancel = true;
-            MessageBox.Show(this, "변환을 취소한 뒤 PST 정리가 끝나면 창을 닫을 수 있습니다.",
-                "변환 진행 중", MessageBoxButton.OK, MessageBoxImage.Information);
+            if (waitingForClose) return;
+            waitingForClose = true;
+            try
+            {
+                if (viewModel.IsBusy) log.Info("APP_CLOSE_WAIT", "cancel active operation and wait for file cleanup");
+                await viewModel.PrepareCloseAsync();
+                // Leave the current Closing event before calling Close again.
+                await System.Windows.Threading.Dispatcher.Yield();
+                allowClose = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                log.Error("APP_CLOSE_ERROR", "cleanup failed", ex);
+                waitingForClose = false;
+            }
         }
+    }
 
-        base.OnClosing(e);
+    protected override void OnClosed(EventArgs e)
+    {
+        BackupPage.ClearPassword();
+        if (DataContext is ApplicationViewModel viewModel) viewModel.Backup.ClearCredentials();
+        log.Info("APP_WINDOW_CLOSED", "main window closed");
+        base.OnClosed(e);
     }
 }

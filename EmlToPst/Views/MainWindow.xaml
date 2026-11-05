@@ -1,144 +1,41 @@
 <Window x:Class="EmlToPst.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="EML → Outlook PST" Width="860" Height="670" MinWidth="620" MinHeight="560"
+        xmlns:views="clr-namespace:EmlToPst.Views"
+        Title="회사 웹메일 백업 · EML → PST" Width="1040" Height="920" MinWidth="860" MinHeight="740"
         WindowStartupLocation="CenterScreen" Background="#F5F7FA"
         FontFamily="Segoe UI, Malgun Gothic" Foreground="#17293D">
     <Window.Resources>
         <Style TargetType="Button">
-            <Setter Property="Padding" Value="16,6" />
-            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="14,6" /><Setter Property="MinHeight" Value="32" />
         </Style>
         <Style TargetType="TextBox">
-            <Setter Property="Padding" Value="8,5" />
-            <Setter Property="BorderBrush" Value="#C7D2DE" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="8,5" /><Setter Property="BorderBrush" Value="#C7D2DE" />
+            <Setter Property="VerticalContentAlignment" Value="Center" /><Setter Property="MinHeight" Value="32" />
         </Style>
+        <Style TargetType="TabItem"><Setter Property="Padding" Value="18,9" /></Style>
     </Window.Resources>
-
-    <Grid Margin="24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-
-        <StackPanel Margin="0,0,0,16">
-            <TextBlock FontSize="28" FontWeight="SemiBold" Text="EML → Outlook PST" />
-            <TextBlock Margin="0,4,0,0" Foreground="#4E6074"
-                       Text="폴더의 EML 메일을 하나의 클래식 Outlook 데이터 파일로 저장합니다." />
-        </StackPanel>
-
-        <Border Grid.Row="1" Padding="16" Background="White" BorderBrush="#D7DFE7"
-                BorderThickness="1" CornerRadius="8">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="114" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <TextBlock VerticalAlignment="Center" Text="원본 EML 폴더" />
-                <TextBox Grid.Column="1" Margin="0,0,8,0" IsReadOnly="True"
-                         AutomationProperties.Name="원본 EML 폴더"
-                         Text="{Binding SourceFolder, Mode=OneWay}" />
-                <Button Grid.Column="2" Command="{Binding SelectSourceCommand}" Content="폴더 선택" />
-
-                <TextBlock Grid.Row="1" Margin="0,8,0,0" VerticalAlignment="Center" Text="결과 PST 파일" />
-                <TextBox Grid.Row="1" Grid.Column="1" Margin="0,8,8,0" IsReadOnly="True"
-                         AutomationProperties.Name="결과 PST 파일"
-                         Text="{Binding OutputPath, Mode=OneWay}" />
-                <Button Grid.Row="1" Grid.Column="2" Margin="0,8,0,0" Command="{Binding SelectOutputCommand}"
-                        Content="저장 위치" />
-
-                <WrapPanel Grid.Row="2" Grid.ColumnSpan="3" Margin="0,14,0,0" IsEnabled="{Binding IsIdle}">
-                    <CheckBox Margin="0,0,20,4" IsChecked="{Binding IncludeSubfolders}"
-                              Content="하위 폴더 포함 및 구조 유지" />
-                    <CheckBox Margin="0,0,0,4" IsChecked="{Binding AttachToOutlook}"
-                              Content="완료 후 Outlook에 PST 연결" />
-                </WrapPanel>
-            </Grid>
-        </Border>
-
-        <Grid Grid.Row="2" Margin="0,14,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Margin="0,0,14,0" VerticalAlignment="Center">
-                <TextBlock FontWeight="SemiBold" Text="{Binding Status}" TextWrapping="Wrap" />
-                <TextBlock Margin="0,3,0,0" Foreground="#4E6074" Text="{Binding CurrentFile}"
-                           ToolTip="{Binding CurrentFile}" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button Margin="0,0,8,0" Content="변환 시작" Command="{Binding StartCommand}"
-                        Background="#DCEBFF" BorderBrush="#86ADE2" FontWeight="SemiBold" />
-                <Button Content="취소" Command="{Binding CancelCommand}" />
-            </StackPanel>
-        </Grid>
-
-        <ProgressBar Grid.Row="3" Height="8" Margin="0,0,0,14"
-                     AutomationProperties.Name="EML 변환 진행률"
-                     Maximum="{Binding ProgressMaximum, Mode=OneWay}" Value="{Binding Processed, Mode=OneWay}"
-                     IsIndeterminate="{Binding IsIndeterminate, Mode=OneWay}" />
-
-        <Border Grid.Row="4" Padding="16" Background="White" BorderBrush="#D7DFE7"
-                BorderThickness="1" CornerRadius="8">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <TextBlock FontSize="16" FontWeight="SemiBold" Text="변환 결과" />
-                <TextBox Grid.Row="1" Margin="0,7,0,0" IsReadOnly="True"
-                         AutomationProperties.Name="저장된 PST 경로"
-                         Text="{Binding SavedPath, Mode=OneWay}" />
-                <TextBox Grid.Row="2" Margin="0,7,0,0" Padding="0" BorderThickness="0" MaxHeight="82"
-                         Foreground="#79510C" IsReadOnly="True" TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto" AutomationProperties.Name="결과 안내"
-                         Text="{Binding Notes, Mode=OneWay}">
-                    <TextBox.Style>
-                        <Style TargetType="TextBox">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding Notes}" Value="">
-                                    <Setter Property="Visibility" Value="Collapsed" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBox.Style>
-                </TextBox>
-                <Grid Grid.Row="3" Margin="0,7,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox Margin="0,0,8,0" IsReadOnly="True" AutomationProperties.Name="변환 로그 파일 경로"
-                             Text="{Binding LogPath, Mode=OneWay}" ToolTip="{Binding LogPath}" />
-                    <Button Grid.Column="1" Content="로그 열기" Command="{Binding OpenLogCommand}" />
+    <Grid Margin="16">
+        <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+        <TabControl SelectedIndex="{Binding SelectedTab}" Background="#F5F7FA" BorderBrush="#D7DFE7">
+            <TabItem Header="웹메일 백업">
+                <views:BackupView x:Name="BackupPage" DataContext="{Binding Backup}" />
+            </TabItem>
+            <TabItem Header="EML → PST 변환">
+                <views:PstImportView DataContext="{Binding Pst}" />
+            </TabItem>
+        </TabControl>
+        <Border Grid.Row="1" Padding="12" Margin="0,12,0,0" Background="White" BorderBrush="#D7DFE7" BorderThickness="1" CornerRadius="6">
+            <StackPanel>
+                <TextBlock Text="{Binding SessionStatus}" FontWeight="SemiBold" />
+                <Grid Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBox Text="{Binding LogPath, Mode=OneWay}" IsReadOnly="True" ToolTip="{Binding LogPath}"
+                             AutomationProperties.Name="프로그램 실행 로그 파일" />
+                    <Button Grid.Column="1" Content="실행 로그 열기" Command="{Binding OpenLogCommand}" Margin="8,0,0,0" />
                 </Grid>
-                <TextBlock Grid.Row="4" Margin="0,10,0,5" FontWeight="SemiBold" Text="실패한 EML 파일" />
-                <DataGrid Grid.Row="5" ItemsSource="{Binding Failures}" IsReadOnly="True"
-                          CanUserAddRows="False" AutoGenerateColumns="False" HeadersVisibility="Column"
-                          GridLinesVisibility="Horizontal" ClipboardCopyMode="IncludeHeader"
-                          BorderBrush="#D7DFE7" AlternatingRowBackground="#F5F7FA"
-                          AutomationProperties.Name="실패한 EML 파일 목록">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="상대 경로" Binding="{Binding FilePath, Mode=OneWay}" Width="2*" />
-                        <DataGridTextColumn Header="오류 내용" Binding="{Binding Reason, Mode=OneWay}" Width="3*" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </Grid>
+                <TextBlock Text="{Binding LogProblem}" TextWrapping="Wrap" Foreground="#A12D27" />
+            </StackPanel>
         </Border>
     </Grid>
 </Window>

@@ -6,6 +6,12 @@ namespace EmlToPst.Services;
 
 internal sealed class FileDialogService(Window owner)
 {
+    public string? SelectBackupFolder()
+    {
+        var dialog = new OpenFolderDialog { Title = "웹메일 백업 저장 폴더 선택" };
+        return dialog.ShowDialog(owner) == true ? dialog.FolderName : null;
+    }
+
     public string? SelectSourceFolder()
     {
         var dialog = new OpenFolderDialog { Title = "EML 원본 폴더 선택" };

@@ -6,9 +6,9 @@ using OfficeIMO.Email.Store;
 
 namespace EmlToPst.Services;
 
-internal sealed record ExpectedMessage(string SourceFile, AttachmentPayload[] Payloads, DateTimeOffset? ReceivedDate);
+internal sealed record ExpectedMessage(string SourceFile, AttachmentPayload[] Payloads, DateTimeOffset? ReceivedDate, bool? IsRead = null);
 
-internal sealed record PstVerificationResult(int AttachmentFailures, int DateFailures);
+internal sealed record PstVerificationResult(int AttachmentFailures, int DateFailures, int ReadStateFailures);
 
 internal static class PstVerification
 {
@@ -69,10 +69,13 @@ internal static class PstVerification
     {
         int expectedAttachments = pending.Values.Count(message => message.Payloads.Length > 0);
         int expectedDates = pending.Values.Count(message => message.ReceivedDate.HasValue);
+        int expectedReadStates = pending.Values.Count(message => message.IsRead.HasValue);
         int checkedAttachments = 0;
         int checkedDates = 0;
         int attachmentFailures = 0;
         int dateFailures = 0;
+        int readFailures = 0;
+        int checkedReadStates = 0;
         long attachmentBudget = Math.Max(4L * 1024 * 1024 * 1024, new FileInfo(pstPath).Length);
         var readerOptions = new EmailStoreReaderOptions(maxTotalAttachmentBytes: attachmentBudget);
         var itemOptions = new EmailStoreItemReadOptions(EmailStoreItemReadParts.AttachmentContent,
@@ -103,6 +106,25 @@ internal static class PstVerification
                     attachmentFailures++;
                 }
             }
+            if (expected.IsRead is bool expectedRead)
+            {
+                checkedReadStates++;
+                try
+                {
+                    bool? actual = store.ReadSummary(reference).IsRead;
+                    if (actual != expectedRead)
+                    {
+                        readFailures++;
+                        log.Warn("PST_READ_VERIFY", $"mismatch | file={expected.SourceFile} | expected={expectedRead} | actual={actual}");
+                    }
+                    else log.Info("PST_READ_VERIFY", $"matched | file={expected.SourceFile} | isRead={actual}");
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    readFailures++;
+                    log.Error("PST_READ_VERIFY", $"read failed | file={expected.SourceFile}", ex);
+                }
+            }
 
             if (pending.Count == 0)
             {
@@ -123,11 +145,17 @@ internal static class PstVerification
                 dateFailures++;
                 log.Warn(DateStage, $"item missing | file={missing.SourceFile} | item={id} | expected={missing.ReceivedDate:O}");
             }
+            if (missing.IsRead.HasValue)
+            {
+                readFailures++;
+                log.Warn("PST_READ_VERIFY", $"item missing | file={missing.SourceFile} | item={id}");
+            }
         }
 
         log.Info(AttachmentStage, $"completed | expectedMessages={expectedAttachments} | checkedMessages={checkedAttachments} | failedMessages={attachmentFailures}");
         log.Info(DateStage, $"completed | expectedMessages={expectedDates} | checkedMessages={checkedDates} | failedMessages={dateFailures}");
-        return new PstVerificationResult(attachmentFailures, dateFailures);
+        log.Info("PST_READ_VERIFY", $"completed | expectedMessages={expectedReadStates} | checkedMessages={checkedReadStates} | failedMessages={readFailures}");
+        return new PstVerificationResult(attachmentFailures, dateFailures, readFailures);
     }
 
     private static bool VerifyDate(EmailStoreSession store, EmailStoreItemReference reference, string file,

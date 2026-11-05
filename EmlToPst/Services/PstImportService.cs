@@ -13,7 +13,7 @@ internal sealed class PstImportService
         ImportLog log, CancellationToken cancellationToken)
     {
         var elapsed = Stopwatch.StartNew();
-        log.Info("START", $"source={options.SourceFolder} | output={options.OutputPath}"
+        log.Info("PST_START", $"source={options.SourceFolder} | output={options.OutputPath}"
             + $" | recursive={options.IncludeSubfolders} | attachToOutlook={options.AttachToOutlook}"
             + " | pstEngine=OfficeIMO.Email 3.5.3");
 
@@ -23,7 +23,7 @@ internal sealed class PstImportService
                 () => WritePst(options, progress, log, cancellationToken), cancellationToken);
 
             if (options.AttachToOutlook && result.PstPath is string path && !result.Cancelled
-                && !result.AttachmentVerificationFailed && !result.ReceivedDateVerificationFailed)
+                && !result.AttachmentVerificationFailed && !result.ReceivedDateVerificationFailed && !result.ReadStateVerificationFailed)
             {
                 progress.Report(new ImportProgress(result.Imported + result.Failures.Count, result.Total,
                     result.Imported, result.Failures.Count, "완성된 PST를 Outlook에 연결 중"));
@@ -44,6 +44,7 @@ internal sealed class PstImportService
                     (false, _, _) => "option disabled",
                     (_, true, _) => "attachment verification failed",
                     (_, _, true) => "received date verification failed",
+                    _ when result.ReadStateVerificationFailed => "read state verification failed",
                     _ => "no eligible saved PST"
                 };
                 log.Info("OUTLOOK_ATTACH", $"skipped: {reason}");
@@ -51,22 +52,23 @@ internal sealed class PstImportService
 
             result = result with { Cancelled = result.Cancelled || cancellationToken.IsCancellationRequested };
             int saved = result.PstPath is null ? 0 : result.Imported;
-            log.Info("END", $"total={result.Total} | written={result.Imported} | saved={saved}"
+            log.Info("PST_END", $"total={result.Total} | written={result.Imported} | saved={saved}"
                 + $" | failed={result.Failures.Count} | unprocessed={result.Total - result.Imported - result.Failures.Count}"
                 + $" | cancelled={result.Cancelled} | attached={result.AttachedToOutlook}"
                 + $" | attachmentVerificationFailed={result.AttachmentVerificationFailed}"
                 + $" | receivedDateVerificationFailed={result.ReceivedDateVerificationFailed}"
+                + $" | readStateVerificationFailed={result.ReadStateVerificationFailed}"
                 + $" | elapsedMs={elapsed.ElapsedMilliseconds} | pst={result.PstPath ?? "(none)"}");
             return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            log.Info("END", $"cancelled=true | saved=0 | elapsedMs={elapsed.ElapsedMilliseconds}");
+            log.Info("PST_END", $"cancelled=true | saved=0 | elapsedMs={elapsed.ElapsedMilliseconds}");
             throw;
         }
         catch (Exception ex)
         {
-            log.Error("END", $"saved=0 | elapsedMs={elapsed.ElapsedMilliseconds}", ex);
+            log.Error("PST_END", $"saved=0 | elapsedMs={elapsed.ElapsedMilliseconds}", ex);
             throw;
         }
     }
@@ -108,9 +110,12 @@ internal sealed class PstImportService
         var uiUpdate = Stopwatch.StartNew();
         int imported = 0;
         int receivedDates = 0;
+        int readStates = 0;
         bool cancelled = false;
         bool attachmentVerificationFailed = false;
         bool receivedDateVerificationFailed = false;
+        bool readStateVerificationFailed = false;
+        using var backupMetadata = new BackupMetadataCatalog(log);
         string? savedPath = null;
         string? currentFile = null;
         stage = "PST_CREATE";
@@ -122,7 +127,7 @@ internal sealed class PstImportService
             using var writer = EmailStorePstWriter.Create(output,
                 new EmailStorePstWriterOptions(displayName: Path.GetFileNameWithoutExtension(output)));
             string root = writer.AddFolder("EML 가져오기", containerClass: "IPF.Note");
-            var folderIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [""] = root };
+            var folderIds = new Dictionary<string, string>(StringComparer.Ordinal) { [""] = root };
 
             try
             {
@@ -141,6 +146,7 @@ internal sealed class PstImportService
                     log.Info(stage, $"{index + 1}/{files.Length} | file={currentFile}");
                     try
                     {
+                        StoredBackupMessage? metadata = backupMetadata.Find(eml, cancellationToken);
                         using (EmailReadResult message = ReadEml(reader, eml, cancellationToken))
                         {
                             foreach (var diagnostic in message.Diagnostics)
@@ -154,7 +160,11 @@ internal sealed class PstImportService
                                 throw new InvalidDataException($"EML을 읽는 중 오류가 발생했습니다. ({codes})");
                             }
 
-                            string receivedSource = EmlTimestampMapper.Apply(message.Document);
+                            (string receivedSource, bool? isRead) = ImapPstMetadata.Apply(message.Document, metadata);
+                            if (metadata is not null)
+                            {
+                                log.Info("IMAP_METADATA", $"file={currentFile} | validity={metadata.UidValidity} | uid={metadata.Uid} | isRead={isRead}");
+                            }
                             DateTimeOffset? receivedDate = message.Document.ReceivedDate;
                             log.Info("EML_DATES", $"file={currentFile} | receivedSource={receivedSource}"
                                 + $" | received={receivedDate?.ToString("O") ?? "(none)"}"
@@ -165,7 +175,9 @@ internal sealed class PstImportService
                             cancellationToken.ThrowIfCancellationRequested();
                             stage = "PST_ADD_ITEM";
                             string relativeFolder = Path.GetDirectoryName(currentFile) ?? "";
-                            string folderId = EnsureFolder(writer, folderIds, relativeFolder);
+                            string[] folderParts = metadata?.FolderParts ?? relativeFolder.Split(
+                                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+                            string folderId = EnsureFolder(writer, folderIds, folderParts);
                             // Once a write starts, finish it before observing cancellation.
                             string itemId = writer.AddItem(folderId, message.Document);
                             if (receivedDate.HasValue)
@@ -173,9 +185,10 @@ internal sealed class PstImportService
                                 receivedDates++;
                             }
 
-                            if (payloads.Length > 0 || receivedDate.HasValue)
+                            if (isRead.HasValue) readStates++;
+                            if (payloads.Length > 0 || receivedDate.HasValue || isRead.HasValue)
                             {
-                                expectedMessages.Add(itemId, new ExpectedMessage(currentFile, payloads, receivedDate));
+                                expectedMessages.Add(itemId, new ExpectedMessage(currentFile, payloads, receivedDate, isRead));
                             }
                         }
 
@@ -226,7 +239,7 @@ internal sealed class PstImportService
                 if (expectedMessages.Count > 0)
                 {
                     progress.Report(new ImportProgress(imported + failures.Count, files.Length,
-                        imported, failures.Count, "PST 첨부파일 및 수신 일자 검증 중"));
+                        imported, failures.Count, "PST 첨부파일·수신 일자·읽음 상태 검증 중"));
                     int attachmentMessages = expectedMessages.Values.Count(message => message.Payloads.Length > 0);
                     log.Info("PST_VERIFY", $"started | messages={attachmentMessages}");
                     log.Info("PST_DATE_VERIFY", $"started | messages={receivedDates} | sourceDateMissing={imported - receivedDates}");
@@ -244,11 +257,17 @@ internal sealed class PstImportService
                             receivedDateVerificationFailed = true;
                             warnings.Add($"메일 {verification.DateFailures:N0}건의 수신 일자 검증에 실패했습니다. 로그의 PST_DATE_VERIFY를 확인해 주세요.");
                         }
+                        if (verification.ReadStateFailures > 0)
+                        {
+                            readStateVerificationFailed = true;
+                            warnings.Add($"메일 {verification.ReadStateFailures:N0}건의 읽음 상태 검증에 실패했습니다. 로그의 PST_READ_VERIFY를 확인해 주세요.");
+                        }
                     }
                     catch (Exception ex)
                     {
                         attachmentVerificationFailed = attachmentMessages > 0;
                         receivedDateVerificationFailed = receivedDates > 0;
+                        readStateVerificationFailed = readStates > 0;
                         warnings.Add($"저장된 PST를 다시 읽어 검증하지 못했습니다. {DescribeError(ex)}");
                         log.Error("PST_VERIFY", "verification stopped", ex);
                     }
@@ -276,7 +295,7 @@ internal sealed class PstImportService
         }
 
         return new ImportResult(files.Length, imported, failures, cancelled, savedPath, false, warnings,
-            attachmentVerificationFailed, receivedDateVerificationFailed);
+            attachmentVerificationFailed, receivedDateVerificationFailed, readStateVerificationFailed);
     }
 
     private static EmailReadResult ReadEml(EmailDocumentReader reader, string path, CancellationToken cancellationToken)
@@ -290,18 +309,13 @@ internal sealed class PstImportService
         return reader.ReadStreaming(input, path, cancellationToken);
     }
 
-    private static string EnsureFolder(EmailStorePstWriter writer, Dictionary<string, string> folderIds, string relativeFolder)
+    private static string EnsureFolder(EmailStorePstWriter writer, Dictionary<string, string> folderIds, IReadOnlyList<string> folderParts)
     {
-        if (folderIds.TryGetValue(relativeFolder, out string? folderId))
-        {
-            return folderId;
-        }
-
         string current = "";
         string parentId = folderIds[current];
-        foreach (string name in relativeFolder.Split(Path.DirectorySeparatorChar))
+        foreach (string name in folderParts)
         {
-            current = Path.Combine(current, name);
+            current += "\0" + name;
             if (!folderIds.TryGetValue(current, out string? childId))
             {
                 childId = writer.AddFolder(name, parentId, "IPF.Note");

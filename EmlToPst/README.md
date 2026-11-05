@@ -1,81 +1,129 @@
-# EML → Outlook PST
+# 회사 웹메일 백업 · EML → PST
 
-Windows용 C# WPF MVVM 프로젝트입니다. 선택한 폴더의 EML을 새 Unicode PST 하나에 저장합니다. 하위 폴더 포함이 기본값이며, PST의 `EML 가져오기` 폴더 아래에 원본의 상대 폴더 구조를 재현합니다.
+Windows용 C# WPF 프로그램입니다. IMAP으로 회사 메일을 한 통씩 EML로 저장하고, 저장한 EML을 새 PST로 변환합니다. 기존 로컬 EML 변환도 계속 사용할 수 있습니다.
 
-## 실행 환경
+이 ZIP은 수정한 **소스 프로젝트**입니다. 기존 실행 파일·bin·obj·Visual Studio 캐시는 포함하지 않습니다.
 
-- 빌드에는 **.NET 10 SDK**가 필요합니다. Visual Studio를 사용할 경우 **Visual Studio 2026**에서 **.NET 데스크톱 개발** 워크로드를 설치합니다. [Microsoft의 .NET 설치 안내](https://learn.microsoft.com/dotnet/core/install/windows)
-- EML 읽기와 PST 생성에는 MIT 라이선스의 `OfficeIMO.Email` 3.5.3을 사용합니다. PST 생성은 Outlook 설치 없이 가능합니다. [OfficeIMO.Email NuGet](https://www.nuget.org/packages/OfficeIMO.Email) · [OfficeIMO PST 문서](https://officeimo.com/docs/email/mailbox-stores/)
-- 자동 연결을 사용할 때는 클래식 Outlook을 설치하고 기본 프로필을 설정합니다. Outlook 연결은 설치된 클래식 Outlook의 COM 개체 모델을 사용합니다. [Outlook AddStoreEx](https://learn.microsoft.com/en-us/office/vba/api/outlook.namespace.addstoreex)
+## 실행 환경과 빌드
 
-## 빌드 및 사용
+- Windows, .NET 10 SDK, Visual Studio의 .NET 데스크톱 개발 워크로드.
+- 패키지: OfficeIMO.Email 3.5.3, MailKit 4.17.0, Microsoft.Data.Sqlite 10.0.14.
+- 최초 빌드에서 NuGet 패키지를 복원합니다.
+- IMAP 백업과 PST 생성 자체에는 Outlook이 필요하지 않습니다. **완료 후 Outlook에 PST 연결** 옵션은 클래식 Outlook과 기본 프로필이 필요합니다.
 
-1. ZIP을 풀고 `EmlToPst.sln`을 열어 **F5**를 누릅니다. Windows 터미널에서 실행할 수도 있습니다.
+ZIP을 풀고 `EmlToPst.sln`을 열어 빌드/실행하거나 다음 명령을 실행합니다.
 
-   ```powershell
-   dotnet run --project .\EmlToPst.csproj
-   ```
+```powershell
+dotnet run --project .\EmlToPst.csproj
+```
 
-2. **폴더 선택**에서 EML 원본 폴더를 선택합니다. ZIP 백업을 사용하는 경우 먼저 압축을 풉니다.
-3. **저장 위치**에서 새 `.pst` 파일명을 지정합니다.
-4. **완료 후 Outlook에 PST 연결**을 선택하면 PST 저장이 끝난 뒤 클래식 Outlook에 별도 데이터 파일로 연결합니다. 기본값인 체크 해제 상태에서는 PST만 저장합니다.
-5. **변환 시작**을 누릅니다. 저장·실패·미처리 건수와 PST 경로를 확인할 수 있습니다. 실패 목록에서 파일을 선택하고 `Ctrl+C`로 복사할 수 있습니다.
+WPF 빌드와 오프라인 회귀 검사를 함께 실행하려면:
 
-나중에 열려면 클래식 Outlook에서 **파일 → 열기 및 내보내기 → Outlook 데이터 파일 열기**를 선택합니다. [Microsoft의 PST 열기 안내](https://support.microsoft.com/ko-kr/outlook/open-and-close-outlook-data-files-pst)
+```powershell
+.\Build.ps1
+```
 
-## 변환 로그
+게시용 폴더까지 만들려면:
 
-변환을 시작할 때마다 `%LOCALAPPDATA%\EmlToPst\Logs\`에 별도의 UTF-8 `.log` 파일을 만듭니다. 앱에서 경로를 복사하거나 **로그 열기**로 메모장에서 확인할 수 있습니다. 로그 파일은 변환 중에도 열 수 있습니다.
+```powershell
+.\Build.ps1 -Publish
+```
 
-| 로그 단계 | 기록 내용 |
+게시 경로: `bin\x64\Release\net10.0-windows\win-x64\publish\`.
+게시 폴더의 EXE만 복사하지 말고 폴더 전체를 복사합니다. Microsoft.Data.Sqlite가 사용하는 네이티브 DLL도 필요합니다. 이 게시 방식은 대상 PC에 .NET 10 Desktop Runtime이 설치되어 있어야 합니다.
+
+## 1. 회사 웹메일 백업
+
+1. **웹메일 백업** 탭에서 서버 `Address`, 포트 `Number`을 확인합니다. 연결은 SSL/TLS입니다.
+2. IMAP 로그인 ID와 비밀번호를 입력합니다. 로그인 ID는 서버 정책에 따라 전체 이메일 주소 또는 별도 계정명입니다.
+3. **연결 및 메일함 조회**를 누릅니다. 웹 로그인과 IMAP 인증 정책이 다르면 IMAP 사용 설정이나 별도 비밀번호가 필요할 수 있습니다.
+4. 백업할 메일함을 선택합니다. 조회된 폴더는 처음에 전체 선택됩니다.
+5. **저장 폴더**를 선택하고 **백업 시작 / 이어서 백업**을 누릅니다.
+6. 중단하려면 **중단**을 누릅니다. 다음 실행에도 같은 계정·서버·포트·저장 폴더를 선택하면 완료된 메일을 검사한 뒤 건너뜁니다.
+
+메일함은 읽기 전용으로 열며 서버의 읽음 상태·메일·폴더를 변경하지 않습니다. 서버가 IMAP으로 공개하고 계정에 접근 권한이 있는 개인 메일함만 백업할 수 있습니다. 웹메일 전용 보관함이 IMAP 목록에 없는 경우 이 방식으로 내려받을 수 없습니다.
+
+비밀번호는 실행 중 메모리에서만 사용하며 설정 파일이나 백업 DB에 저장하지 않습니다. 서버의 인증서를 정상적으로 검증합니다. 인증서 오류가 나면 PC 시각, 신뢰할 수 있는 회사 인증서와 서버 이름을 확인합니다.
+
+### 저장 구조
+
+선택한 폴더 아래에 계정별 폴더를 만듭니다.
+
+| 경로 | 내용 |
 | --- | --- |
-| `START`, `SCAN` | 원본과 결과 경로, 옵션, 파일 검색 건수 |
-| `EML_READ`, `PST_ADD_ITEM` | 파일별 상대 경로, 처리 순번, 누적 기록 및 읽기 실패 건수 |
-| `EML_ATTACHMENTS` | 원본 EML 크기, 읽어 낸 파일·인라인 첨부의 개수, 합계 및 최대 크기 |
-| `PST_FINALIZE` | PST 저장 시작·완료, 저장 크기, 폴더와 메일 수, 변환 진단 코드 |
-| `PST_VERIFY` | 저장된 PST를 다시 읽어 원본에서 읽은 첨부와 개수·크기·SHA-256 비교, 불일치 또는 읽기 오류가 발생한 메일 |
-| `OUTLOOK_ATTACH` | 옵션 해제 등으로 건너뛴 이유 또는 Outlook 연결 결과 |
-| `CANCEL`, `END` | 취소 시점, 최종 집계, 소요 시간, PST 경로 |
+| `계정_식별값\Messages\메일함_식별값\UIDVALIDITY_UID.eml` | 서버가 제공한 메일 원문 |
+| `계정_식별값\backup.sqlite3` | 완료 기록·무결성·원본 폴더명·날짜·플래그 |
+| `*.part` | 아직 최종 확정하지 않은 메일 |
+| `*.eml.previous_*` | 손상되었거나 검증할 수 없어 보존한 이전 파일 |
 
-실패할 때는 관련 단계, 예외 메시지, HRESULT와 호출 스택을 기록합니다. 로그에는 원본 경로와 파일명이 포함됩니다. 변환 중 로그 기록이 불가능해지면 화면에 표시하고 PST 변환을 계속합니다.
+로컬 폴더명에는 Windows 이름 충돌을 피하는 식별값이 붙습니다. PST 변환 시 DB의 원본 메일함 이름을 사용합니다. **Messages와 backup.sqlite3를 함께 보관**하세요. 백업을 다른 PC로 옮길 때도 계정 폴더 전체를 복사합니다.
 
-## 동작과 복구
+### 이어받기·복구 동작
 
-- 원본 EML은 읽기 전용으로 엽니다. 기존 PST를 덮어쓰지 않도록 하고, 정상 완료된 새 PST를 최종 경로에 확정합니다.
-- 읽을 수 없는 EML은 실패로 기록하고 다음 파일로 넘어갑니다. PST 기록 또는 확정 단계에서 예외가 발생하면 변환을 중단하고 저장 여부를 표시합니다.
-- 취소를 요청하면 현재 쓰기 작업을 마친 뒤 이미 기록한 메일을 PST로 저장합니다. 저장된 메일이 있더라도 취소한 작업에서는 Outlook 자동 연결을 건너뜁니다.
-- 자동 연결에 실패해도 완성된 PST는 저장 위치에 남습니다.
-- 일반 파일과 인라인 첨부 데이터는 메일별로 저장 전후에 확인합니다. 링크, 임베디드 Outlook 항목, 일정과 연락처로 변환되는 MIME 콘텐츠는 별도 형식이므로 이 바이트 비교의 범위에서 제외됩니다. 검증에 실패하면 PST는 확인을 위해 보관하고 Outlook 자동 연결은 건너뜁니다.
-- EML의 날짜, 인라인 이미지, 특수 인코딩, 서명·암호화 메일은 라이브러리가 변환하는 범위에 따릅니다. Outlook에서 표시되는 형태는 대표 샘플로 확인할 수 있습니다.
+- `서버/포트/계정/메일함/UIDVALIDITY/UID`로 메일을 구분합니다. 제목이나 Message-ID만으로 중복을 판단하지 않습니다.
+- 완료된 메일도 파일 크기와 SHA-256이 일치해야 건너뜁니다. 많은 메일을 다시 검사하면 디스크 읽기 시간이 걸릴 수 있습니다.
+- 파일 저장이 중단되면 그 한 통은 다시 받습니다. 한 메일의 바이트 위치부터 이어받는 기능은 없습니다.
+- 검증 완료 직후 종료된 경우에는 staged DB 기록과 `.part`/최종 EML을 비교해 복구합니다.
+- 일시적인 통신 오류는 최초 시도 후 2초/5초/10초 간격으로 최대 3회 재시도합니다. 재시도를 모두 소진하면 백업을 중단하며 다음 실행에서 이어갈 수 있습니다. 비밀번호·인증서 오류는 자동으로 반복하지 않습니다.
+- 백업 시작 때 메일함별 UID 목록을 고정합니다. 그 뒤 새로 도착한 메일은 다음 실행에서 받습니다.
+- 백업 도중 서버에서 삭제·이동된 메일은 별도 집계합니다. 서버에서 삭제된 메일도 이미 저장된 백업에서는 삭제하지 않습니다.
+- 메일함 UIDVALIDITY가 바뀌면 이전 파일을 남기고 새 세대의 파일을 저장합니다. 이전 세대 파일도 같은 Messages 아래에 보존되므로 전체 PST 변환에 포함될 수 있습니다.
+- 같은 계정 폴더에 두 백업 프로그램이 동시에 쓰는 것은 막습니다.
 
-## 프로젝트 구조
+첨부파일과 삽입 이미지는 EML에 실제로 포함된 데이터를 보존합니다. 웹메일의 대용량 첨부가 외부 다운로드 링크이면 링크 대상 파일을 별도로 보관해야 합니다. 외부 이미지를 새로 내려받거나 메일의 HTML을 실행하지 않습니다.
 
-| 위치 | 역할 |
+## 2. PST로 변환하고 Outlook에서 열기
+
+1. 백업 탭의 **PST 변환에 사용**을 누르면 백업 EML 폴더가 변환 탭에 자동으로 선택됩니다.
+2. **저장 위치**에서 새 PST 파일명을 지정합니다. 기존 PST는 덮어쓰지 않습니다.
+3. 필요하면 **완료 후 Outlook에 PST 연결**을 선택하고 **변환 시작**을 누릅니다.
+4. 완료 결과와 오류 목록을 확인합니다. 자동 연결을 사용하지 않았다면 클래식 Outlook에서 **파일 → 열기 및 내보내기 → Outlook 데이터 파일 열기**로 PST를 엽니다.
+
+IMAP 백업 EML은 DB에 기록한 SHA-256으로 확인한 뒤 변환합니다. 서버의 InternalDate를 수신 일자로 적용하고, 값이 없으면 기존 Received 헤더 해석을 사용합니다. InternalDate는 서버 이관/재업로드 이력에 따라 원래 배달 시각과 다를 수 있습니다. 발신 일자는 EML의 Date 값을 우선합니다.
+
+읽음/안 읽음과 임시보관 상태도 반영합니다. 기타 IMAP 플래그·키워드는 DB에 보존하며 전부 Outlook 속성으로 매핑하지는 않습니다. 저장한 PST를 다시 열어 첨부 개수·바이트 수·SHA-256, 수신 일자, 읽음 상태를 검증합니다. 검증 실패 시 Outlook 자동 연결은 생략하고 결과를 표시합니다. 일반 EML 폴더는 기존처럼 변환할 수 있습니다.
+
+반복 백업 후 PST가 필요하면 새 파일명으로 다시 생성합니다. 기존 PST에 증분으로 추가하는 기능은 없습니다. EML 백업은 이어받을 수 있지만 PST 변환은 매번 지정한 범위를 새 PST로 생성합니다.
+
+## 3. 프로그램 실행 전체 로그
+
+프로그램 생성 시 로그 파일 하나를 열고, 메일함 조회·백업·PST 변환을 여러 번 실행해도 **같은 파일에 누적**합니다. 정상 종료 시 마지막으로 `APP_EXIT`를 기록하고 닫습니다. 아무 작업 없이 실행 후 종료해도 로그가 남습니다.
+
+기본 위치는 **실행 파일이 있는 폴더의 Logs**입니다. 이 위치에 쓸 수 없으면 `%LOCALAPPDATA%\EmlToPst\Logs`를 사용합니다. 실제 경로는 화면 아래 **실행 로그 열기** 옆에 표시됩니다. UTF-8, 줄 단위 즉시 Flush이며 다른 스레드의 기록도 한 줄씩 보호합니다.
+
+| 단계 | 기록 내용 |
 | --- | --- |
-| `Views/MainWindow.xaml` | 입력 선택, 진행률, 저장 결과, 로그 열기 |
-| `ViewModels/MainViewModel.cs` | 화면 상태, 명령, 취소 |
-| `Models/ImportModels.cs` | 옵션, 진행률, 결과 |
-| `Services/PstImportService.cs` | EML 검색, 읽기, Unicode PST 쓰기, 저장 후 연결 분기 |
-| `Services/AttachmentVerification.cs` | 파일·인라인 첨부의 바이트 수와 SHA-256 검증 |
-| `Services/OutlookPstAttacher.cs` | 이미 저장된 PST를 클래식 Outlook에 연결 |
-| `Services/ImportLog.cs` | 변환 건별 로그 파일 생성 및 기록 |
+| `APP_START`, `APP_READY` | 실행 시작, 프로세스·버전·런타임, 창 초기화 완료 |
+| `UI_*` | 탭 변경, 경로 선택, 취소, 종료 요청 |
+| `IMAP_QUERY`, `IMAP_CONNECT`, `IMAP_CONNECTED`, `IMAP_DISCONNECT` | 연결·인증·메일함 조회·연결 정리 |
+| `BACKUP_START`, `IMAP_SNAPSHOT`, `IMAP_SAVED`, `IMAP_SKIP` | 백업 범위, 메일별 저장·검증·건너뜀 |
+| `IMAP_RETRY`, `IMAP_RECOVER`, `IMAP_MISSING`, `IMAP_MESSAGE_FAIL` | 재접속, 중간 저장 복구, 삭제·이동, 실패 |
+| `BACKUP_CANCEL`, `BACKUP_ABORT`, `BACKUP_END` | 중단, 예외 종료, 최종 집계 |
+| `PST_START`, `SCAN`, `EML_READ`, `EML_DATES`, `PST_ADD_ITEM` | 변환 시작, EML별 읽기·날짜·기록 |
+| `PST_FINALIZE`, `PST_VERIFY`, `PST_DATE_VERIFY`, `PST_READ_VERIFY`, `PST_END` | PST 확정, 첨부·날짜·읽음 검증, 집계 |
+| `APP_CLOSE_WAIT`, `APP_WINDOW_CLOSED`, `APP_EXIT` | 작업 정리 대기, 창 종료, 실행 종료 |
+| `APP_*_EXCEPTION`, `APP_UNHANDLED` | 처리되지 않은 UI/Task/프로세스 예외 |
 
-EML 읽기와 PST 생성은 작업 스레드에서 수행합니다. 자동 연결을 선택했을 때만 WPF STA 스레드에서 Outlook COM을 호출합니다. [Outlook 개체 모델의 스레딩](https://learn.microsoft.com/en-us/office/client-developer/outlook/selecting-an-api-or-technology-for-developing-solutions-for-outlook)
+로그에는 계정명, 서버, 폴더·파일 경로, UID, 크기·해시와 처리 결과가 포함됩니다. 메일 본문과 비밀번호는 기록하지 않습니다. 작업 중 오류 문자열에 비밀번호가 포함되면 마스킹합니다. 로그 쓰기 실패는 화면에 표시합니다.
 
-## 샘플 확인
+작업 중 창을 닫으면 중단을 요청하고 파일 정리가 끝난 뒤 종료합니다. PST를 확정하거나 검증하는 중이면 정리가 끝날 때까지 기다립니다. 작업 관리자 강제 종료·정전·프로세스 강제 중단에서는 종료 이벤트 자체가 실행되지 않을 수 있어 `APP_EXIT`를 보장할 수 없습니다. 이때는 마지막으로 디스크에 반영된 로그와 백업 기록으로 상태를 확인합니다.
 
-`SampleEml`에는 가상 주소를 사용한 일반 텍스트 메일과 HTML 메일이 하나씩 있습니다. 아래 표의 시나리오마다 새 PST 파일명을 사용합니다.
+## 4. 확인할 항목
 
-| 확인 항목 | 예상 결과 |
-| --- | --- |
-| 클래식 Outlook을 닫고 자동 연결 해제 | Outlook을 시작하지 않고 PST 생성. 로그에는 `skipped: option disabled` 표시 |
-| 하위 폴더 포함 | 메일 두 건 저장. 일반 메일은 `EML 가져오기`, HTML 메일은 `EML 가져오기\2026`에 표시 |
-| 하위 폴더 옵션 해제 | 루트 EML 한 건만 저장 |
-| 메일 원본 내용 | 한글 제목·본문, 보낸 사람·받는 사람, 날짜, 인라인 이미지와 `안내.txt` 첨부 확인 |
-| 복사한 샘플 폴더에 0바이트 `empty.eml` 추가 | 메일 두 건 저장. 실패 목록 및 로그에 `empty.eml` 기록 |
-| 기존 PST 경로를 다시 선택 | 기존 파일 유지. 로그에 경로 검증 실패 기록 |
-| 자동 연결 선택 | 로그에 `PST_FINALIZE` 저장 완료와 `PST_VERIFY`가 `OUTLOOK_ATTACH` 시작보다 먼저 표시 |
-| Outlook이 없는 PC에서 자동 연결 선택 | PST는 저장되고 화면과 로그에 연결 실패 표시 |
-| 첨부가 누락된 원본 EML만 별도 폴더에서 재변환 | `EML_ATTACHMENTS`에서 읽은 첨부 개수와 크기를 확인. `PST_VERIFY`의 `matched`는 라이브러리로 PST를 다시 읽었을 때 첨부 바이트가 일치했음을 뜻함. Outlook에서도 첨부를 열거나 저장해 확인 |
+처음에는 작은 메일함으로 확인하세요.
 
-Windows 빌드와 실제 Outlook에서 PST 열기는 위 환경에서 확인해야 합니다.
+1. 메일함 목록에 받은편지함·보낸편지함·사용자 폴더가 있는지 확인.
+2. 메일 10통 정도를 백업하고 본문, 한글, 일반/삽입 첨부를 확인.
+3. 백업 중단 후 재실행하여 기존 백업은 건너뛰고 나머지만 저장되는지 확인.
+4. PST 변환 후 웹메일과 Outlook의 날짜·읽음 상태·첨부를 비교.
+5. 변환을 여러 번 실행해도 실행 로그 경로가 같고, 정상 종료 후 `APP_EXIT`가 마지막에 있는지 확인.
+
+오프라인 회귀 검사는 회사 서버를 사용하지 않고 가짜 메일 소스로 수행합니다.
+
+```powershell
+dotnet run --project .\Tests\BackupRegression\BackupRegression.csproj -c Release
+```
+
+시나리오: 최초/반복 백업, 같은 크기의 손상, 중단 후 재개, 부분 전송 실패와 재접속, 비밀번호 마스킹, staged 파일 복구, UIDVALIDITY 변경, 서버 삭제, 경로 충돌/범위 검사, 미래 DB 버전 거부, 동시 로그, PST 날짜/읽음/첨부 왕복 검증.
+
+제공 환경의 실행 가능 범위와 실제 수행한 검사는 `VALIDATION.md`에 기록했습니다. 회사 IMAP 계정 로그인과 Windows/Outlook 화면 동작은 실제 PC에서 확인해야 합니다.

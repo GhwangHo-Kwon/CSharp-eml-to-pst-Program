@@ -10,6 +10,8 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 {
     private readonly PstImportService importer;
     private readonly FileDialogService dialogs;
+    private readonly ImportLog log;
+    private readonly OperationCoordinator coordinator;
     private CancellationTokenSource? cancellation;
     private bool isBusy;
     private string sourceFolder = "";
@@ -24,16 +26,24 @@ internal sealed class MainViewModel : INotifyPropertyChanged
     private bool isIndeterminate;
     private IReadOnlyList<ImportFailure> failures = [];
 
-    public MainViewModel(PstImportService importer, FileDialogService dialogs)
+    public MainViewModel(PstImportService importer, FileDialogService dialogs, ImportLog log, OperationCoordinator coordinator)
     {
         this.importer = importer;
         this.dialogs = dialogs;
-        SelectSourceCommand = new RelayCommand(SelectSource, () => !IsBusy);
-        SelectOutputCommand = new RelayCommand(SelectOutput, () => !IsBusy);
+        this.log = log;
+        this.coordinator = coordinator;
+        LogPath = log.FilePath ?? "";
+        SelectSourceCommand = new RelayCommand(SelectSource, () => IsIdle);
+        SelectOutputCommand = new RelayCommand(SelectOutput, () => IsIdle);
         StartCommand = new RelayCommand(async () => await StartAsync(),
-            () => !IsBusy && SourceFolder.Length > 0 && OutputPath.Length > 0);
+            () => IsIdle && SourceFolder.Length > 0 && OutputPath.Length > 0);
         CancelCommand = new RelayCommand(Cancel, () => IsBusy && cancellation?.IsCancellationRequested == false);
         OpenLogCommand = new RelayCommand(OpenLog, () => LogPath.Length > 0);
+        coordinator.Changed += () =>
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsIdle)));
+            SelectSourceCommand.Refresh(); SelectOutputCommand.Refresh(); StartCommand.Refresh();
+        };
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -58,7 +68,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     public bool IncludeSubfolders { get; set; } = true;
     public bool AttachToOutlook { get; set; }
-    public bool IsIdle => !IsBusy;
+    public bool IsIdle => coordinator.CanStart;
 
     public bool IsBusy
     {
@@ -79,6 +89,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (dialogs.SelectSourceFolder() is string path)
         {
             SourceFolder = path;
+            log.Info("UI_PST_SOURCE", $"source={path}");
             StartCommand.Refresh();
         }
     }
@@ -88,19 +99,19 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         if (dialogs.SelectOutputPath(OutputPath) is string path)
         {
             OutputPath = path;
+            log.Info("UI_PST_OUTPUT", $"output={path}");
             StartCommand.Refresh();
         }
     }
 
     private async Task StartAsync()
     {
+        if (!coordinator.TryBegin()) return;
         using var run = new CancellationTokenSource();
         cancellation = run;
         IsBusy = true;
         Failures = [];
         SavedPath = "";
-        LogPath = "";
-        OpenLogCommand.Refresh();
         Notes = "";
         CurrentFile = "";
         Processed = 0;
@@ -108,13 +119,13 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         IsIndeterminate = true;
         Status = "EML 파일을 찾는 중입니다.";
 
-        var log = new ImportLog();
         try
         {
-            LogPath = log.FilePath ?? "";
-            OpenLogCommand.Refresh();
             var options = new ImportOptions(SourceFolder, OutputPath, IncludeSubfolders, AttachToOutlook);
-            var progress = new Progress<ImportProgress>(UpdateProgress);
+            var progress = new Progress<ImportProgress>(update =>
+            {
+                if (ReferenceEquals(cancellation, run)) UpdateProgress(update);
+            });
             ImportResult result = await importer.ImportAsync(options, progress, log, run.Token);
             ShowResult(result);
         }
@@ -126,10 +137,10 @@ internal sealed class MainViewModel : INotifyPropertyChanged
         {
             Status = "변환을 시작하지 못했습니다.";
             Notes = PstImportService.DescribeError(ex);
+            log.Error("UI_PST_ERROR", "PST operation failed", ex);
         }
         finally
         {
-            log.Dispose();
             if (log.Problem is string problem)
             {
                 AppendNote(problem);
@@ -139,6 +150,7 @@ internal sealed class MainViewModel : INotifyPropertyChanged
             IsIndeterminate = false;
             cancellation = null;
             IsBusy = false;
+            coordinator.End();
         }
     }
 
@@ -186,9 +198,24 @@ internal sealed class MainViewModel : INotifyPropertyChanged
 
     private void Cancel()
     {
+        if (cancellation is null || cancellation.IsCancellationRequested) return;
+        log.Info("UI_PST_CANCEL", "cancel requested");
         cancellation?.Cancel();
         Status = "취소 요청 중입니다. 현재 파일 처리 후 PST를 정리합니다.";
         CancelCommand.Refresh();
+    }
+
+    public void RequestCancel() => Cancel();
+
+    public void UseBackupFolder(string path)
+    {
+        if (!IsIdle) return;
+        SourceFolder = path;
+        IncludeSubfolders = true;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IncludeSubfolders)));
+        Status = "백업한 EML 폴더를 선택했습니다. 새 PST 저장 위치를 지정한 뒤 변환해 주세요.";
+        log.Info("UI_PST_SOURCE", $"source={path} | origin=IMAP_BACKUP");
+        StartCommand.Refresh();
     }
 
     private void OpenLog()
